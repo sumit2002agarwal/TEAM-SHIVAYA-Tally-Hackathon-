@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>User Portal</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #f0f4f8;
+        color: #333;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        margin: 0;
+      }
+
+      .container {
+        background-color: #fff;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+        width: 100%;
+        max-width: 400px;
+        text-align: center;
+      }
+
+      h1 {
+        font-size: 1.75em;
+        margin-bottom: 20px;
+        color: #007bff;
+      }
+
+      input[type="text"],
+      input[type="password"] {
+        padding: 12px;
+        font-size: 1em;
+        margin-bottom: 15px;
+        width: 100%;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        box-sizing: border-box;
+      }
+
+      button {
+        background-color: #007bff;
+        color: #fff;
+        padding: 12px;
+        font-size: 1em;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background-color 0.3s ease, transform 0.2s ease;
+        width: 100%;
+      }
+
+      button:hover {
+        background-color: #0056b3;
+        transform: translateY(-2px);
+      }
+
+      button:active {
+        background-color: #004085;
+        transform: translateY(0);
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .group-list {
+        text-align: left;
+        margin-bottom: 20px;
+      }
+
+      .group-item {
+        margin: 10px 0;
+        padding: 10px;
+        background-color: #f8f9fa;
+        border-radius: 4px;
+        border: 1px solid #ddd;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+      }
+
+      .group-item button {
+        background-color: #28a745;
+        border: none;
+        padding: 8px 12px;
+        font-size: 0.9em;
+        color: #fff;
+        cursor: pointer;
+        border-radius: 4px;
+        transition: background-color 0.3s ease, transform 0.2s ease;
+      }
+
+      .group-item button:hover {
+        background-color: #218838;
+        transform: translateY(-1px);
+      }
+
+      .file-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 10px 0;
+        border-bottom: 1px solid #ddd;
+      }
+
+      .file-item a {
+        color: #007bff;
+        text-decoration: none;
+      }
+
+      .file-item a:hover {
+        text-decoration: underline;
+      }
+
+      .file-list {
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>User Login</h1>
+      <input type="text" id="userId" placeholder="User ID" />
+      <input type="password" id="userPassword" placeholder="Password" />
+      <button id="userLoginBtn">Login</button>
+
+      <div id="joinGroupSection" class="hidden">
+        <h2>Join a Group</h2>
+        <select id="groupDropdown"></select>
+        <input type="password" id="joinPassword" placeholder="Enter password" />
+        <button id="joinGroupBtn">Join Group</button>
+      </div>
+      <div id="userActions" class="hidden">
+        <h1>Your Groups</h1>
+        <div id="groupsContainer" class="group-list"></div>
+      </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      const userLoginBtn = document.getElementById("userLoginBtn");
+      const userActions = document.getElementById("userActions");
+      const groupsContainer = document.getElementById("groupsContainer");
+      const joinGroupSection = document.getElementById("joinGroupSection");
+      const groupDropdown = document.getElementById("groupDropdown");
+      const joinGroupBtn = document.getElementById("joinGroupBtn");
+      const joinPassword = document.getElementById("joinPassword");
+      let currentGroup = null;
+
+      const socket = io();
+
+      userLoginBtn.addEventListener("click", () => {
+        const userId = document.getElementById("userId").value;
+        const userPassword = document.getElementById("userPassword").value;
+
+        fetch("/user/login", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ userid: userId, password: userPassword }),
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.status === "success") {
+              userActions.classList.remove("hidden");
+              joinGroupSection.classList.remove("hidden");
+              loadUserGroups(data.user);
+              loadAvailableGroups();
+            } else {
+              alert("Invalid credentials");
+            }
+          });
+      });
+
+      function loadUserGroups(user) {
+        user.groups.forEach((groupName) => {
+          const groupDiv = document.createElement("div");
+          groupDiv.classList.add("group-item");
+          groupDiv.innerHTML = `<span>${groupName}</span><button onclick="openGroup('${groupName}')">View Files</button>`;
+          groupsContainer.appendChild(groupDiv);
+
+          socket.emit("join-group", groupName);
+        });
+      }
+
+      function openGroup(groupName) {
+        currentGroup = groupName;
+
+        // Clear previously displayed files
+        const fileList = document.getElementById("fileList");
+        if (fileList) {
+          fileList.remove();
+        }
+
+        // Create a new file list element
+        const newFileList = document.createElement("div");
+        newFileList.id = "fileList";
+        newFileList.classList.add("file-list");
+        groupsContainer.appendChild(newFileList);
+
+        // Join the selected group
+        socket.emit("join-group", groupName);
+
+        // Listen for file uploads in this group
+        socket.off("file-uploaded"); // Remove previous listeners to avoid duplicates
+        socket.on("file-uploaded", (file) => {
+          if (file.groupName === currentGroup) {
+            const fileItem = document.createElement("div");
+            fileItem.classList.add("file-item");
+            fileItem.innerHTML = `<span>${file.fileName}</span><a href="/download/${file.fileName}" download>Download</a>`;
+            newFileList.appendChild(fileItem);
+          }
+        });
+      }
+
+      function loadAvailableGroups() {
+        fetch("/user/groups")
+          .then((response) => response.json())
+          .then((groups) => {
+            groupDropdown.innerHTML = ""; // Clear existing options
+            groups.forEach((group) => {
+              const option = document.createElement("option");
+              option.value = group;
+              option.textContent = group;
+              groupDropdown.appendChild(option);
+            });
+          });
+      }
+
+      joinGroupBtn.addEventListener("click", () => {
+        const selectedGroup = groupDropdown.value;
+        const userId = document.getElementById("userId").value;
+        const password = joinPassword.value;
+
+        if (password !== "join") {
+          alert("Incorrect password");
+          return;
+        }
+
+        fetch("/user/join-group", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            groupName: selectedGroup,
+            userid: userId,
+            password,
+          }),
+        })
+          .then((response) => response.json())
+          .then((data) => {
+            if (data.status === "success") {
+              alert(data.message);
+              loadUserGroups({ userid: userId, groups: [selectedGroup] });
+            } else {
+              alert(data.message);
+            }
+          });
+      });
+    </script>
+  </body>
+</html>

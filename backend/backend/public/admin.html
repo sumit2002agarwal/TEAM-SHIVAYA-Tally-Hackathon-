@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Portal</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 20px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background-color: #f9f9f9;
+    }
+    .hidden {
+      display: none;
+    }
+    h1, h2 {
+      color: #333;
+    }
+    input[type="text"], input[type="password"], input[type="file"] {
+      width: 100%;
+      padding: 8px;
+      margin: 8px 0;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    button {
+      background-color: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 15px;
+      text-align: center;
+      text-decoration: none;
+      display: inline-block;
+      font-size: 16px;
+      margin: 4px 2px;
+      cursor: pointer;
+      border-radius: 4px;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    #progressContainer {
+      margin-top: 20px;
+    }
+    #progressBar {
+      width: 100%;
+      background-color: #ddd;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    #progressBar div {
+      height: 24px;
+      background-color: #007bff;
+      width: 0;
+      text-align: center;
+      color: white;
+      line-height: 24px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Admin Portal</h1>
+
+    <!-- Admin Login Form -->
+    <div id="adminLoginSection">
+      <h2>Admin Login</h2>
+      <input type="text" id="adminId" placeholder="Admin ID" />
+      <input type="password" id="adminPassword" placeholder="Password" />
+      <button id="adminLoginBtn">Login</button>
+    </div>
+
+    <!-- Admin Actions Section -->
+    <div id="adminActions" class="hidden">
+      <!-- Create Group Section -->
+      <h2>Create Group</h2>
+      <input type="text" id="groupName" placeholder="Group Name" />
+      <button id="createGroupBtn">Create Group</button>
+
+      <!-- Add Users to Group Section -->
+      <h2>Add Users to Group</h2>
+      <input type="text" id="groupForUsers" placeholder="Group Name" />
+      <input type="text" id="userIds" placeholder="User IDs (comma-separated)" />
+      <button id="addUsersBtn">Add Users</button>
+
+      <!-- Upload File to Group Section -->
+      <h2>Upload File to Group</h2>
+      <input type="file" id="fileInput" />
+      <input type="text" id="uploadGroup" placeholder="Group Name" />
+      <button id="uploadFileBtn">Upload File</button>
+
+      <!-- Progress Bar -->
+      <div id="progressContainer" class="hidden">
+        <h3>Upload Progress</h3>
+        <div id="progressBar">
+          <div id="progressText">0%</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const adminLoginBtn = document.getElementById('adminLoginBtn');
+    const adminActions = document.getElementById('adminActions');
+    const progressContainer = document.getElementById('progressContainer');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+
+    // Handle Admin Login
+    adminLoginBtn.addEventListener('click', () => {
+      const adminId = document.getElementById('adminId').value;
+      const adminPassword = document.getElementById('adminPassword').value;
+
+      fetch('/admin/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ userid: adminId, password: adminPassword })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.status === 'success') {
+          adminActions.classList.remove('hidden');
+        } else {
+          alert('Invalid credentials');
+        }
+      });
+    });
+
+    // Handle Group Creation
+    document.getElementById('createGroupBtn').addEventListener('click', () => {
+      const groupName = document.getElementById('groupName').value;
+
+      fetch('/admin/create-group', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ groupName })
+      })
+      .then(response => response.json())
+      .then(data => {
+        alert(data.message);
+      });
+    });
+
+    // Handle Adding Users to Group
+    document.getElementById('addUsersBtn').addEventListener('click', () => {
+      const groupName = document.getElementById('groupForUsers').value;
+      const userIds = document.getElementById('userIds').value.split(',').map(id => id.trim());
+
+      fetch('/admin/add-to-group', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ groupName, userIds })
+      })
+      .then(response => response.json())
+      .then(data => {
+        alert(data.message);
+      });
+    });
+
+    // Handle File Upload in Chunks
+    document.getElementById('uploadFileBtn').addEventListener('click', () => {
+      const fileInput = document.getElementById('fileInput');
+      const groupName = document.getElementById('uploadGroup').value;
+
+      if (fileInput.files.length === 0) {
+        alert('Please select a file');
+        return;
+      }
+
+      const file = fileInput.files[0];
+      uploadFileInChunks(file, groupName);
+    });
+
+    function uploadFileInChunks(file, groupName) {
+      const CHUNK_SIZE = 200 * 1024; // 200 KB
+      const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+      let offset = 0;
+      let chunkIndex = 0;
+
+      progressContainer.classList.remove('hidden');
+      progressBar.firstElementChild.style.width = '0%';
+      progressText.textContent = '0%';
+
+      const updateProgress = (percentage) => {
+        progressBar.firstElementChild.style.width = `${percentage}%`;
+        progressText.textContent = `${percentage}%`;
+      };
+
+      const uploadNextChunk = () => {
+        if (offset >= file.size) {
+          return;
+        }
+
+        const chunk = file.slice(offset, offset + CHUNK_SIZE);
+        const formData = new FormData();
+        formData.append('file', chunk, file.name);
+        formData.append('chunkIndex', chunkIndex);
+        formData.append('totalChunks', totalChunks);
+        formData.append('groupName', groupName);
+        formData.append('userid', 'admin'); // Adding admin ID
+        formData.append('password', 'admin'); // Adding admin password
+
+        fetch('/upload', {
+          method: 'POST',
+          body: formData
+        })
+        .then(response => response.text())
+        .then(data => {
+          console.log(`Chunk ${chunkIndex + 1} of ${totalChunks} uploaded`);
+          chunkIndex++;
+          offset += CHUNK_SIZE;
+          updateProgress(Math.min(Math.round((offset / file.size) * 100),100));
+          uploadNextChunk();
+        });
+      };
+
+      uploadNextChunk();
+    }
+  </script>
+</body>
+</html>
